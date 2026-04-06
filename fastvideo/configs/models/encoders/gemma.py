@@ -45,6 +45,12 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     connector_double_precision_rope: bool = False
     connector_num_learnable_registers: int | None = 128
 
+    # Audio connector (defaults match video; LTX-2.3 overrides)
+    audio_connector_num_attention_heads: int | None = None
+    audio_connector_attention_head_dim: int | None = None
+    audio_connector_num_layers: int | None = None
+    audio_feature_extractor_out_features: int | None = None
+
     _fsdp_shard_conditions: list = field(
         default_factory=lambda: [_is_feature_extractor_linear, _is_embeddings, _is_gemma_model])
 

@@ -27,6 +27,8 @@ class PreprocessWorkflowT2V(PreprocessWorkflow):
 
             forward_batch = self.preprocess_pipeline.forward(forward_batch, self.fastvideo_args)
 
+            if getattr(forward_batch, 'data_type', None) == 'skip':
+                continue
             self.processed_dataset_saver.save_and_write_parquet_batch(forward_batch, self.training_dataset_output_dir)
 
         self.processed_dataset_saver.flush_tables()

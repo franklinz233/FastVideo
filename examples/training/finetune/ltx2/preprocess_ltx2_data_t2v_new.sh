@@ -1,10 +1,10 @@
 #!/bin/bash
 
-GPU_NUM=4
-MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
-DATASET_PATH="data/crush-smol"
+GPU_NUM=8
+MODEL_PATH="/root/data_root/model/converted_ltx23"
+DATASET_PATH="/pfs_root/sc/dataset/sekai/sekai-game-walking-formatted"
 OUTPUT_DIR="$DATASET_PATH"
-WITH_AUDIO=true
+WITH_AUDIO=false
 
 
 torchrun  --nproc_per_node=$GPU_NUM \
@@ -24,4 +24,4 @@ torchrun  --nproc_per_node=$GPU_NUM \
     --preprocess.max_width 1920 \
     --preprocess.num_frames 121 \
     --preprocess.train_fps 24 \
-    --preprocess.video_length_tolerance_range 5
+    --preprocess.video_length_tolerance_range 15

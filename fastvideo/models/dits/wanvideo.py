@@ -636,9 +636,49 @@ class WanTransformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
+        # Get rotary embeddings with YaRN support for longer sequences
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
+        
+        # YaRN (Yet another RoPE extensioN) for handling longer temporal sequences
+        # Reference: https://arxiv.org/abs/2401.06268
+        # When training on longer videos than pretrained, we need to interpolate RoPE
+        rope_pretrained_max_t = getattr(self.config, 'rope_pretrained_max_t', 20)
+        use_yarn = getattr(self.config, 'use_yarn', True)
+        yarn_temperature_beta = getattr(self.config, 'yarn_temperature_beta', 0.1)
+        
+        # Calculate scale factor for temporal dimension
+        # WAN 2.1 pretrained on 81 frames → T=20 latent frames
+        # For longer videos, we need RoPE interpolation
+        temporal_scale = post_patch_num_frames / rope_pretrained_max_t
+        
+        if temporal_scale > 1.0 and use_yarn:
+            # YaRN combines:
+            # 1. NTK-aware interpolation: rescale base frequency
+            # 2. Position interpolation: scale positions
+            # 3. Temperature scaling: smooth the attention distribution
+            
+            # NTK-aware: increase theta for longer sequences
+            theta_rescale_factor = temporal_scale
+
+            # No position interpolation (NTK already handles extrapolation)
+            interpolation_factor = 1.0
+            
+            # YaRN temperature: temp = beta * ln(scale) + 1.0
+            # This helps maintain attention distribution quality
+            yarn_temperature = yarn_temperature_beta * math.log(temporal_scale) + 1.0
+            
+            # Apply YaRN only to temporal dimension (first in rope_dim_list)
+            # Spatial dimensions don't need interpolation as they're typically similar
+            theta_rescale_factor_list = [theta_rescale_factor, 1.0, 1.0]
+            interpolation_factor_list = [interpolation_factor, 1.0, 1.0]
+            yarn_temperature_list = [yarn_temperature, 1.0, 1.0]
+        else:
+            # No interpolation needed or YaRN disabled
+            theta_rescale_factor_list = 1.0
+            interpolation_factor_list = 1.0
+            yarn_temperature_list = 1.0
+        
         freqs_cos, freqs_sin = get_rotary_pos_embed(
             (post_patch_num_frames, post_patch_height,
              post_patch_width),
@@ -646,7 +686,10 @@ class WanTransformer3DModel(BaseDiT):
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000)
+            rope_theta=10000,
+            theta_rescale_factor=theta_rescale_factor_list,
+            interpolation_factor=interpolation_factor_list,
+            yarn_temperature=yarn_temperature_list)
         freqs_cis = (freqs_cos.to(hidden_states.device).float(),
                      freqs_sin.to(hidden_states.device).float())
 

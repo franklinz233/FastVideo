@@ -449,6 +449,8 @@ class ComposedPipelineBase(ABC):
         # logger.info("Batch: %s", batch)
         for stage in self.stages:
             batch = stage(batch, fastvideo_args)
+            if getattr(batch, 'data_type', None) == 'skip':
+                break
 
         # Return the output
         return batch

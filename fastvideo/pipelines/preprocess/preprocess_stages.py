@@ -60,7 +60,14 @@ class VideoTransformStage(PipelineStage):
             if fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
                 video = batch.video_loader[i].get_frames_at(frame_indices).data
             elif fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHVISION:
-                video, _, _ = torchvision.io.read_video(batch.video_loader[i], output_format="TCHW")
+                video, _, _ = torchvision.io.read_video(batch.video_loader[i], pts_unit="sec", output_format="TCHW")
+                if video.shape[0] == 0:
+                    batch.data_type = "skip"
+                    return batch
+                frame_indices = frame_indices[frame_indices < video.shape[0]]
+                if len(frame_indices) == 0:
+                    batch.data_type = "skip"
+                    return batch
                 video = video[frame_indices]
             else:
                 raise ValueError(f"Invalid video loader type: {fastvideo_args.preprocess_config.video_loader_type}")

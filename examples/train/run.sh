@@ -26,11 +26,24 @@ NUM_GPUS="${NUM_GPUS:-1}"
 NNODES="${NNODES:-1}"
 NODE_RANK="${NODE_RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
-MASTER_PORT="${MASTER_PORT:-29501}"
+MASTER_PORT="${MASTER_PORT:-29502}"
 export TOKENIZERS_PARALLELISM=false
 # ── W&B ──────────────────────────────────────────────────────────
-export WANDB_API_KEY="${WANDB_API_KEY:-}"
+export NCCL_SOCKET_IFNAME=eth0
+export NCCL_IB_DISABLE=1
+export NCCL_TIMEOUT=3600
+export TORCH_NCCL_ENABLE_MONITORING=0
+export TORCH_DIST_INIT_BARRIER_TIMEOUT=3600
+export TOKENIZERS_PARALLELISM=false
+
+export WANDB_API_KEY="${WANDB_API_KEY:-3314e12be1d243355d4ff7b5f7a10995b0c45cbf}"
+export WANDB_ENTITY="${WANDB_ENTITY:-1241400738}"
 export WANDB_MODE="${WANDB_MODE:-online}"
+
+# export HF_ENDPOINT=https://hf-mirror.com
+export HUGGINGFACE_TOKEN="${HUGGINGFACE_TOKEN:-your_token_here}"
+export HF_HOME="/pfs_root/sc/.cache/huggingface"
+
 
 # ── Log file ─────────────────────────────────────────────────────
 CONFIG_NAME="$(basename "${CONFIG}" .yaml)"
@@ -49,13 +62,14 @@ echo "Extra args:  $*"
 echo "Log file:    ${LOG_FILE}"
 echo "=============================="
 
-python -m torch.distributed.run \
+
+torchrun \
     --nnodes "${NNODES}" \
     --node_rank "${NODE_RANK}" \
     --nproc_per_node "${NUM_GPUS}" \
     --master_addr "${MASTER_ADDR}" \
     --master_port "${MASTER_PORT}" \
-    fastvideo/train/entrypoint/train.py \
+    -m fastvideo.train.entrypoint.train \
     --config "${CONFIG}" \
     "$@" \
     2>&1 | tee "${LOG_FILE}"

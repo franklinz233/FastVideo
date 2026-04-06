@@ -347,9 +347,19 @@ class WanModel(ModelBase):
 
         from fastvideo.train.utils.moduleloader import (
             make_inference_args, )
+        from fastvideo.distributed.communication_op import (
+            warmup_sequence_parallel_communication, )
 
         neg_embeds: torch.Tensor | None = None
         neg_mask: torch.Tensor | None = None
+
+        # All ranks must participate in SP warmup before rank 0 loads the pipeline.
+        # WanPipeline.from_pretrained() with inference_mode=True will call
+        # warmup_sequence_parallel_communication() in post_init(), which requires
+        # ALL ranks in the SP group to participate in NCCL all-to-all operations.
+        # We warmup SP communication here for all ranks first, so that when rank 0
+        # loads the pipeline, the SP warmup inside will be a no-op (already warmed up).
+        warmup_sequence_parallel_communication(device=device)
 
         if world_group.rank_in_group == 0:
             sampling_param = SamplingParam.from_pretrained(tc.model_path)

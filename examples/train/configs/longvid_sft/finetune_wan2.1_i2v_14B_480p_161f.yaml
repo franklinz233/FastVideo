@@ -1,0 +1,71 @@
+# Wan 2.1 I2V 14B 480P finetune on SpatialVID-HQ dataset (161-frame clips)
+# 161 frames @ 16 FPS = ~10 seconds per clip, latent T=40
+# I2V model can also do T2V (without image input)
+
+models:
+  student:
+    _target_: fastvideo.train.models.wan.WanModel
+    init_from: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
+    trainable: true
+    flow_shift: 5
+
+method:
+  _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
+
+training:
+  distributed:
+    num_gpus: 8
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1   # 1 data parallel group
+    hsdp_shard_dim: 8       # 8-way model sharding (for 14B model)
+
+  data:
+    data_path: /pfs_root/sc/dataset/SpatialVID-HQ/processed-161f
+    dataloader_num_workers: 8
+    train_batch_size: 1     # 14B model needs small batch size
+    training_cfg_rate: 0.1
+    seed: 42
+    num_latent_t: 40
+    num_height: 480
+    num_width: 832
+    num_frames: 157
+
+  optimizer:
+    learning_rate: 5.0e-8   # Smaller LR for 14B model
+    betas: [0.9, 0.999]
+    weight_decay: 0.01
+    lr_scheduler: constant_with_warmup
+    lr_warmup_steps: 200
+
+  loop:
+    max_train_steps: 10000
+    gradient_accumulation_steps: 2  # Effective batch size = 1 * 2 = 2 per GPU
+
+  checkpoint:
+    output_dir: /pfs_root/sc/outputs/spatialvid_wan2.1_i2v_14B_480p_161f
+    training_state_checkpointing_steps: 200
+    checkpoints_total_limit: 5
+    resume_from_checkpoint: null
+
+  tracker:
+    project_name: spatialvid_hq
+    run_name: wan2.1_i2v_14B_480p_161f_finetune
+
+  model:
+    enable_gradient_checkpointing_type: full  # Required for 14B model
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+  validation:
+    _target_: fastvideo.train.callbacks.validation.ValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_pipeline.WanPipeline
+    dataset_file: /pfs_root/sc/dataset/SpatialVID-HQ/validation_samples_161f.json
+    every_steps: 200
+    sampling_steps: [50]
+    guidance_scale: 5.0
+
+pipeline:
+  flow_shift: 5

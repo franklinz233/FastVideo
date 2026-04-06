@@ -65,6 +65,12 @@ class LTX2VideoArchConfig(DiTArchConfig):
     audio_positional_embedding_max_pos: list[int] = field(default_factory=lambda: [20])
     av_ca_timestep_scale_multiplier: int = 1
 
+    # LTX-2.3 (22B) specific features
+    caption_proj_before_connector: bool = False  # True for 22B, False for 19B
+    cross_attention_adaln: bool = False          # True for 22B, False for 19B
+    apply_gated_attention: bool = False          # True for 22B, False for 19B
+    model_version: str = "19b"                   # "19b" or "22b"
+
     def __post_init__(self):
         super().__post_init__()
         patch_volume = self.patch_size[0] * self.patch_size[1] * self.patch_size[2]
@@ -73,6 +79,12 @@ class LTX2VideoArchConfig(DiTArchConfig):
         if self.out_channels is None:
             self.out_channels = self.in_channels
 
+        # Auto-configure based on model version
+        if self.model_version == "22b":
+            self.caption_proj_before_connector = True
+            self.cross_attention_adaln = True
+            self.apply_gated_attention = True
+
 
 @dataclass
 class LTX2VideoConfig(DiTConfig):
@@ -80,3 +92,31 @@ class LTX2VideoConfig(DiTConfig):
 
     arch_config: DiTArchConfig = field(default_factory=LTX2VideoArchConfig)
     prefix: str = "ltx2"
+
+
+@dataclass
+class LTX23VideoArchConfig(LTX2VideoArchConfig):
+    """Architecture configuration for LTX-2.3 (22B) video transformer.
+
+    Key differences from 19B:
+    - caption_proj_before_connector=True: projection lives in
+      text encoder connector, not in the transformer.
+    - cross_attention_adaln=True: text cross-attention uses
+      AdaLN modulation (scale_shift_table grows from 6→9).
+    - apply_gated_attention=True: optional gate projection on
+      attention output.
+    """
+
+    model_version: str = "22b"
+    caption_proj_before_connector: bool = True
+    cross_attention_adaln: bool = True
+    apply_gated_attention: bool = True
+
+
+@dataclass
+class LTX23VideoConfig(DiTConfig):
+    """Main configuration for LTX-2.3 (22B) transformer."""
+
+    arch_config: DiTArchConfig = field(
+        default_factory=LTX23VideoArchConfig)
+    prefix: str = "ltx23"

@@ -286,6 +286,7 @@ def get_1d_rotary_pos_embed(
     theta: float = 10000.0,
     theta_rescale_factor: float = 1.0,
     interpolation_factor: float = 1.0,
+    yarn_temperature: float = 1.0,
     dtype: torch.dtype = torch.float32,
     use_real: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -300,13 +301,15 @@ def get_1d_rotary_pos_embed(
         dim (int): Dimension of the frequency tensor.
         pos (int or torch.FloatTensor): Position indices for the frequency tensor. [S] or scalar
         theta (float, optional): Scaling factor for frequency computation. Defaults to 10000.0.
-        theta_rescale_factor (float, optional): Rescale factor for theta. Defaults to 1.0.
-        interpolation_factor (float, optional): Factor to scale positions. Defaults to 1.0.
-        use_real (bool, optional): If True, output full head_dim with repeated cos/sin for 
+        theta_rescale_factor (float, optional): Rescale factor for theta (NTK-aware). Defaults to 1.0.
+        interpolation_factor (float, optional): Factor to scale positions (Position Interpolation). Defaults to 1.0.
+        yarn_temperature (float, optional): Temperature scaling factor for YaRN. Defaults to 1.0.
+            YaRN paper suggests: temperature = 0.1 * ln(scale_factor) + 1.0
+        use_real (bool, optional): If True, output full head_dim with repeated cos/sin for
             rotate_half style RoPE. If False, output half head_dim for complex style. Defaults to True.
 
     Returns:
-        freqs_cos, freqs_sin: Precomputed frequency tensor with real and imaginary parts separately. 
+        freqs_cos, freqs_sin: Precomputed frequency tensor with real and imaginary parts separately.
             Shape is [S, D] if use_real=True, [S, D/2] if use_real=False.
     """
     if isinstance(pos, int):
@@ -319,6 +322,12 @@ def get_1d_rotary_pos_embed(
 
     freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(dtype) / dim))  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
+    
+    # YaRN: Apply temperature scaling to frequencies before computing cos/sin
+    # This helps maintain stable attention patterns when extending to longer sequences
+    if yarn_temperature != 1.0:
+        freqs = freqs / yarn_temperature
+    
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]
 
@@ -341,6 +350,7 @@ def get_nd_rotary_pos_embed(
     theta=10000.0,
     theta_rescale_factor: float | list[float] = 1.0,
     interpolation_factor: float | list[float] = 1.0,
+    yarn_temperature: float | list[float] = 1.0,
     shard_dim: int = 0,
     sp_rank: int = 0,
     sp_world_size: int = 1,
@@ -359,8 +369,10 @@ def get_nd_rotary_pos_embed(
             args[0] is stop, step is 1; If len(args) == 2, start is start, args[0] is stop, args[1] is num.
         *args: See above.
         theta (float): Scaling factor for frequency computation. Defaults to 10000.0.
-        theta_rescale_factor (float): Rescale factor for theta. Defaults to 1.0.
-        interpolation_factor (float): Factor to scale positions. Defaults to 1.0.
+        theta_rescale_factor (float): Rescale factor for theta (NTK-aware). Defaults to 1.0.
+        interpolation_factor (float): Factor to scale positions (Position Interpolation). Defaults to 1.0.
+        yarn_temperature (float): Temperature scaling factor for YaRN. Defaults to 1.0.
+            YaRN paper suggests: temperature = 0.1 * ln(scale_factor) + 1.0
         shard_dim (int): Which dimension to shard for sequence parallelism. Defaults to 0.
         sp_rank (int): Rank in the sequence parallel group. Defaults to 0.
         sp_world_size (int): World size of the sequence parallel group. Defaults to 1.
@@ -419,6 +431,13 @@ def get_nd_rotary_pos_embed(
     assert len(interpolation_factor) == len(
         rope_dim_list), "len(interpolation_factor) should equal to len(rope_dim_list)"
 
+    if isinstance(yarn_temperature, int | float):
+        yarn_temperature = [yarn_temperature] * len(rope_dim_list)
+    elif isinstance(yarn_temperature, list) and len(yarn_temperature) == 1:
+        yarn_temperature = [yarn_temperature[0]] * len(rope_dim_list)
+    assert len(yarn_temperature) == len(
+        rope_dim_list), "len(yarn_temperature) should equal to len(rope_dim_list)"
+
     # use 1/ndim of dimensions to encode grid_axis
     embs = []
     for i in range(len(rope_dim_list)):
@@ -428,6 +447,7 @@ def get_nd_rotary_pos_embed(
             theta,
             theta_rescale_factor=theta_rescale_factor[i],
             interpolation_factor=interpolation_factor[i],
+            yarn_temperature=yarn_temperature[i],
             dtype=dtype,
             use_real=use_real,
         )  # 2 x [WHD, rope_dim_list[i]] or 2 x [WHD, rope_dim_list[i]*2] if use_real
@@ -446,6 +466,7 @@ def get_rotary_pos_embed(
     rope_theta,
     theta_rescale_factor=1.0,
     interpolation_factor=1.0,
+    yarn_temperature=1.0,
     shard_dim: int = 0,
     do_sp_sharding: bool = False,
     dtype: torch.dtype = torch.float32,
@@ -461,8 +482,10 @@ def get_rotary_pos_embed(
         heads_num: Number of attention heads
         rope_dim_list: List of dimensions for each axis, or None
         rope_theta: Base for frequency calculations
-        theta_rescale_factor: Rescale factor for theta. Defaults to 1.0
-        interpolation_factor: Factor to scale positions. Defaults to 1.0
+        theta_rescale_factor: Rescale factor for theta (NTK-aware). Defaults to 1.0
+        interpolation_factor: Factor to scale positions (Position Interpolation). Defaults to 1.0
+        yarn_temperature: Temperature scaling factor for YaRN. Defaults to 1.0.
+            YaRN paper suggests: temperature = 0.1 * ln(scale_factor) + 1.0
         shard_dim: Which dimension to shard for sequence parallelism. Defaults to 0.
         do_sp_sharding: Whether to shard the positional embeddings for sequence parallelism. Defaults to False.
         use_real: If True, output full head_dim for rotate_half style RoPE. Defaults to True.
@@ -494,6 +517,7 @@ def get_rotary_pos_embed(
         theta=rope_theta,
         theta_rescale_factor=theta_rescale_factor,
         interpolation_factor=interpolation_factor,
+        yarn_temperature=yarn_temperature,
         shard_dim=shard_dim,
         sp_rank=sp_rank,
         sp_world_size=sp_world_size,

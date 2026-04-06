@@ -51,6 +51,3 @@ This repository is agent-friendly. Before doing any work, read:
 4. `.agents/workflows/` — SOPs for common procedures (experiment lifecycle, evaluation, etc.).
 5. `.agents/lessons/` — known pitfalls and their documented fixes.
 
-If you are exploring a new procedure that has no existing SOP, document your
-progress in `.agents/exploration/` and flag it for review at the end of your
-session.

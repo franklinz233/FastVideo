@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Convert LTX-2 weights to FastVideo naming conventions and split by component.
+Convert LTX-2 / LTX-2.3 weights to FastVideo naming conventions and split by component.
 
 LTX 2 conversion requires two huggingface models:
 - LTX 2 model
 - Gemma model
 
-Example usage:
+Example usage (LTX-2 19B):
     python scripts/checkpoint_conversion/convert_ltx2_weights.py \\
         --source "<PATH_TO_LOCAL_REPO>/Lightricks/LTX-2/ltx-2-19b-dev.safetensors" \\
         --output "converted_weights/ltx2-base" \\
@@ -14,6 +14,15 @@ Example usage:
         --pipeline-class-name "LTX2Pipeline" \\
         --diffusers-version "0.33.0.dev0" \\
         --gemma-path "<PATH_TO_LOCAL_REPO>/google/gemma-3-12b-it"
+
+Example usage (LTX-2.3 22B):
+    python scripts/checkpoint_conversion/convert_ltx2_weights.py \\
+        --source "<PATH_TO_LOCAL_REPO>/Lightricks/LTX-2.3/ltx-2.3-22b-dev.safetensors" \\
+        --output "converted_weights/ltx23-base" \\
+        --class-name "LTX2Transformer3DModel" \\
+        --pipeline-class-name "LTX2Pipeline" \\
+        --diffusers-version "0.33.0.dev0" \\
+        --gemma-path "<PATH_TO_LOCAL_REPO>/google/gemma-3-12b-it-qat-q4_0-unquantized"
 """
 
 from __future__ import annotations
@@ -109,6 +118,10 @@ def _filter_transformer_config(config: dict) -> dict:
         "audio_cross_attention_dim",
         "audio_positional_embedding_max_pos",
         "av_ca_timestep_scale_multiplier",
+        # LTX-2.3 (22B) features
+        "caption_proj_before_connector",
+        "cross_attention_adaln",
+        "apply_gated_attention",
     }
     filtered = {k: v for k, v in transformer.items() if k in allowed}
     if "frequencies_precision" in filtered:
@@ -132,8 +145,8 @@ def _build_text_embedding_projection_config(
         "gemma_dtype": "bfloat16",
         "padding_side": "left",
         "feature_extractor_in_features": 3840 * 49,
-        "feature_extractor_out_features": 3840,
-        "connector_num_attention_heads": 30,
+        "feature_extractor_out_features": 4096,
+        "connector_num_attention_heads": 32,
         "connector_attention_head_dim": 128,
         "connector_num_layers": 2,
         "connector_positional_embedding_theta": 10000.0,
@@ -141,6 +154,11 @@ def _build_text_embedding_projection_config(
         "connector_rope_type": "split",
         "connector_double_precision_rope": True,
         "connector_num_learnable_registers": 128,
+        # LTX-2.3 audio connector (32 heads × 64 dim = 2048)
+        "audio_connector_num_attention_heads": 32,
+        "audio_connector_attention_head_dim": 64,
+        "audio_connector_num_layers": 2,
+        "audio_feature_extractor_out_features": 2048,
     }
 
 

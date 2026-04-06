@@ -11,7 +11,6 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (PreprocessPi
 from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (PreprocessPipeline_ODE_Trajectory)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (PreprocessPipeline_T2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (PreprocessPipeline_Text)
-from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline import (PreprocessPipeline_MatrixGame)
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -57,6 +56,7 @@ def main(args) -> None:
         fastvideo_args.pipeline_config.flow_shift = args.flow_shift
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     elif args.preprocess_task == "matrixgame":
+        from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline import (PreprocessPipeline_MatrixGame)
         PreprocessPipeline = PreprocessPipeline_MatrixGame
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "

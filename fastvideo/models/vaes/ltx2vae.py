@@ -1163,17 +1163,21 @@ def _make_decoder_block(
             spatial_padding_mode=spatial_padding_mode,
         )
     elif block_name == "compress_time":
+        out_channels = in_channels // block_config.get("multiplier", 1)
         block = DepthToSpaceUpsample(
             dims=convolution_dimensions,
             in_channels=in_channels,
             stride=(2, 1, 1),
+            out_channels_reduction_factor=block_config.get("multiplier", 1),
             spatial_padding_mode=spatial_padding_mode,
         )
     elif block_name == "compress_space":
+        out_channels = in_channels // block_config.get("multiplier", 1)
         block = DepthToSpaceUpsample(
             dims=convolution_dimensions,
             in_channels=in_channels,
             stride=(1, 2, 2),
+            out_channels_reduction_factor=block_config.get("multiplier", 1),
             spatial_padding_mode=spatial_padding_mode,
         )
     elif block_name == "compress_all":
@@ -1347,6 +1351,7 @@ class VideoDecoder(nn.Module):
         causal: bool = False,
         timestep_conditioning: bool = False,
         decoder_spatial_padding_mode: PaddingModeType = PaddingModeType.REFLECT,
+        base_channels: int = 128,
     ):
         super().__init__()
 
@@ -1361,13 +1366,9 @@ class VideoDecoder(nn.Module):
         self.decode_noise_scale = 0.025
         self.decode_timestep = 0.05
 
-        feature_channels = in_channels
-        for block_name, block_params in list(reversed(decoder_blocks)):
-            block_config = block_params if isinstance(block_params, dict) else {}
-            if block_name == "res_x_y":
-                feature_channels = feature_channels * block_config.get("multiplier", 2)
-            if block_name == "compress_all":
-                feature_channels = feature_channels * block_config.get("multiplier", 1)
+        # LTX VAE decoder architecture uses 3 upsampler blocks with
+        # multiplier 2, so feature_channels = base_channels * 8.
+        feature_channels = base_channels * 8
 
         self.conv_in = make_conv_nd(
             dims=convolution_dimensions,
@@ -1544,6 +1545,7 @@ class VideoDecoderConfigurator:
         norm_layer_str = config.get("norm_layer", "pixel_norm")
         causal = config.get("causal_decoder", False)
         timestep_conditioning = config.get("timestep_conditioning", True)
+        base_channels = config.get("decoder_base_channels", 128)
 
         return VideoDecoder(
             convolution_dimensions=convolution_dimensions,
@@ -1555,6 +1557,7 @@ class VideoDecoderConfigurator:
             causal=causal,
             timestep_conditioning=timestep_conditioning,
             decoder_spatial_padding_mode=decoder_spatial_padding_mode,
+            base_channels=base_channels,
         )
 
 

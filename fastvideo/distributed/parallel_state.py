@@ -399,7 +399,8 @@ class GroupCoordinator:
                                            "as the current rank.")
 
         # Serialize object to tensor and get the size as well
-        object_tensor = torch.frombuffer(pickle.dumps(obj), dtype=torch.uint8)
+        # Use bytearray to create a writable buffer and avoid PyTorch warning
+        object_tensor = torch.frombuffer(bytearray(pickle.dumps(obj)), dtype=torch.uint8)
 
         size_tensor = torch.tensor([object_tensor.numel()], dtype=torch.long, device="cpu")
 

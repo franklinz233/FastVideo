@@ -9,6 +9,7 @@ section.  The pipeline class is resolved from
 from __future__ import annotations
 
 import contextlib
+import gc
 import os
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
@@ -174,6 +175,16 @@ class ValidationCallback(Callback):
 
         output_dir = (self.output_dir or tc.checkpoint.output_dir)
 
+        # Clear GPU memory before validation to reduce OOM risk
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+        # Synchronize all ranks before starting validation
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+            logger.info(f"Rank {self.global_rank}: Starting validation at step {step}")
+
         try:
             transformer.eval()
             num_sp_groups = (self.world_group.world_size // self.sp_group.world_size)
@@ -192,10 +203,19 @@ class ValidationCallback(Callback):
                     all_captions = list(result.captions)
                     for sp_idx in range(1, num_sp_groups):
                         src = (sp_idx * self.sp_world_size)
-                        recv_v = (self.world_group.recv_object(src=src))
-                        recv_c = (self.world_group.recv_object(src=src))
-                        all_videos.extend(recv_v)
-                        all_captions.extend(recv_c)
+                        try:
+                            logger.info(f"Rank 0: Waiting for validation results from rank {src}")
+                            recv_v = (self.world_group.recv_object(src=src))
+                            recv_c = (self.world_group.recv_object(src=src))
+                            all_videos.extend(recv_v)
+                            all_captions.extend(recv_c)
+                            logger.info(f"Rank 0: Successfully received results from rank {src}")
+                        except RuntimeError as e:
+                            logger.error(
+                                f"Failed to receive validation results from rank {src}: {e}. "
+                                f"This rank may have crashed (likely OOM). Skipping its results."
+                            )
+                            continue
 
                     os.makedirs(
                         output_dir,
@@ -241,17 +261,34 @@ class ValidationCallback(Callback):
                             step,
                         )
                 else:
-                    self.world_group.send_object(
-                        result.videos,
-                        dst=0,
-                    )
-                    self.world_group.send_object(
-                        result.captions,
-                        dst=0,
-                    )
+                    try:
+                        logger.info(f"Rank {self.global_rank}: Sending validation results to rank 0")
+                        self.world_group.send_object(
+                            result.videos,
+                            dst=0,
+                        )
+                        self.world_group.send_object(
+                            result.captions,
+                            dst=0,
+                        )
+                        logger.info(f"Rank {self.global_rank}: Successfully sent validation results")
+                    except RuntimeError as e:
+                        logger.error(
+                            f"Rank {self.global_rank}: Failed to send validation results: {e}. "
+                            f"This may indicate OOM or network issues."
+                        )
+                        raise
         finally:
             if was_training:
                 transformer.train()
+
+            # Clean up GPU memory after validation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+
+            if torch.distributed.is_initialized():
+                logger.info(f"Rank {self.global_rank}: Validation cleanup completed")
 
     # ----------------------------------------------------------
     # Pipeline management
@@ -268,8 +305,17 @@ class ValidationCallback(Callback):
         transformer: torch.nn.Module,
     ) -> Any:
         key = (id(transformer), )
-        if (self._pipeline is not None and self._pipeline_key == key):
-            return self._pipeline
+
+        # Force pipeline recreation to avoid memory accumulation
+        # Cached pipelines can accumulate memory fragmentation over multiple validations
+        if self._pipeline is not None:
+            logger.info(f"Rank {self.global_rank}: Cleaning up cached validation pipeline")
+            del self._pipeline
+            self._pipeline = None
+            self._pipeline_key = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
 
         tc = self.training_config
         PipelineCls = resolve_target(self.pipeline_target)

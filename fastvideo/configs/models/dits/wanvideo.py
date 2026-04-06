@@ -72,6 +72,16 @@ class WanVideoArchConfig(DiTArchConfig):
     added_kv_proj_dim: int | None = None
     rope_max_seq_len: int = 1024
     pos_embed_seq_len: int | None = None
+    # Max post-patch temporal length seen during pretraining.
+    # WAN 2.1: 81 frames → (81-1)/4 = 20 latent frames → /p_t(=1) = 20
+    # Used for NTK-Aware RoPE interpolation on longer videos.
+    rope_pretrained_max_t: int = 20
+    
+    # YaRN (Yet another RoPE extensioN) configuration for extending to longer videos
+    # YaRN combines NTK-aware interpolation with temperature scaling for better long-sequence performance
+    use_yarn: bool = True  # Enable YaRN for RoPE interpolation
+    yarn_temperature_beta: float = 0.1  # Temperature coefficient: temp = beta * ln(scale) + 1.0
+    
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
     # Wan MoE
